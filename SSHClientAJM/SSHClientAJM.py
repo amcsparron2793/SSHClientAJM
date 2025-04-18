@@ -169,19 +169,18 @@ class SSHClient:
         print("🔒 SSH session closed.")
         exit(exit_code)
 
-    def get_interactive_shell(self):
+    def get_interactive_shell(self, single_command=None):
         """
-            Provides functionality to create an interactive shell over a given channel.
+        Provides an interactive shell to communicate with a remote server over an
+        existing SSH channel. This method reads user input or executes a single
+        command, sends it to the server, and displays the output received via the
+        connected channel.
 
-            The `interactive_shell` function enables users to send commands to a server
-            by leveraging a continuous input/output shell-like interface. It spawns a
-            thread to handle incoming data from the server while allowing the user to
-            send commands interactively.
-
-            :param channel: A communication channel (e.g., a socket or SSH channel) for
-                reading responses and sending commands.
-            :type channel: Any
-            """
+        :param single_command: A single command string to execute on the server.
+            If not provided, the method defaults to interactive mode to read input
+            continuously from the user.
+        :type single_command: str or None
+        """
 
         def writeall(sock):
             """
@@ -208,16 +207,21 @@ class SSHClient:
 
         try:
             while True:
-                # Read user input and send it to the server
-                command = sys.stdin.readline()
+                # FIXME: this doesn't work, the single command is simply printed over and over, not executed
+                if not single_command:
+                    # Read user input and send it to the server
+                    command = sys.stdin.readline()
+                else:
+                    command = single_command
                 if not command:
                     break
+
                 self._cxn_channel.send(command)
         except KeyboardInterrupt:
             print("\n✋ Disconnected by user.")
         finally:
             self.close(0)
-            #self._cxn_channel.close()
+            # self._cxn_channel.close()
 
 
 
