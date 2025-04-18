@@ -44,22 +44,27 @@ class SSHClient:
     :type username: str
     :ivar client: A `paramiko.SSHClient` instance used to manage the SSH connection.
     :type client: paramiko.SSHClient
-    :ivar _cxn_channel: The communication channel used for the SSH session.
-    :type _cxn_channel: paramiko.Channel
+    :ivar _connection_channel: The communication channel used for the SSH session.
+    :type _connection_channel: paramiko.Channel
     """
-    def __init__(self, hostname=None, port=None, **kwargs):
-        self.hostname = hostname or input('Please Enter Hostname: ')
-        self.port = port or input('Please Enter Port (22): ')
-        if not self.port:
-            self.port = 22
-        self.username:Optional[str] = kwargs.get('username', None)
+
+    def __init__(self, hostname: Optional[str] = None, port: Optional[int] = None, **kwargs):
+        self.hostname: str = hostname
+        self.port: int = port or 22
+        self.username: Optional[str] = kwargs.get('username', None)
+        self.__password: Optional[str] = kwargs.get('password', None)
+        self.client: Optional[paramiko.SSHClient] = self.init_client()
+        self._connection_channel: Optional[paramiko.Channel] = None
+        self._set_defaults()
+
+    def _set_defaults(self):
+        """Sets default values for attributes if they are not provided."""
+        if not self.hostname:
+            self.hostname = input('Please Enter Hostname: ')
         if not self.username:
             self.username = input('Please Enter Username: ')
-        self.__password = kwargs.get('password', None)
         if not self.__password:
             self.__password = getpass.getpass('Please Enter Password: ')
-        self.client = self.init_client()
-        self._cxn_channel: Optional[paramiko.Channel] = None
 
     @classmethod
     def connect_and_get_interactive_shell(cls):#, hostname, port, username, password):
@@ -71,9 +76,9 @@ class SSHClient:
         :return: An instance of the client class with an active interactive shell.
         :rtype: cls
         """
-        client = cls()
-        client.connect()
-        client.get_interactive_shell()
+        c = cls()
+        c.connect()
+        c.get_interactive_shell()
 
     def init_client(self):
         """
@@ -115,9 +120,9 @@ class SSHClient:
             print(f"🔌 Connecting to {self.username}@{self.hostname}:{self.port}...")
             self.client.connect(hostname=self.hostname, port=self.port,
                                 username=self.username, password=self.__password)
-            self._cxn_channel = self.client.invoke_shell()
+            self._connection_channel = self.client.invoke_shell()
             print("✅ Connected.")
-            return self._cxn_channel
+            return self._connection_channel
         except paramiko.AuthenticationException:
             print("❌ Authentication failed.")
             self.close(1)
@@ -200,7 +205,7 @@ class SSHClient:
         :param self: The instance of the class that invokes this method.
         :return: None
         """
-        writer = threading.Thread(target=self._write_all_to_stdout, args=(self._cxn_channel,))
+        writer = threading.Thread(target=self._write_all_to_stdout, args=(self._connection_channel,))
         writer.daemon = True
         writer.start()
 
@@ -224,13 +229,13 @@ class SSHClient:
                     command = command + "\n"
                 if not command:
                     break
-                self._cxn_channel.send(command)
+                self._connection_channel.send(command)
                 command = None
         except KeyboardInterrupt:
             print("\n✋ Disconnected by user.")
         finally:
             self.close(0)
-            # self._cxn_channel.close()
+            # self._connection_channel.close()
 
     def get_interactive_shell(self):
         """
@@ -278,8 +283,9 @@ if __name__ == "__main__":
     # this is how to connect without using the class method
     client = SSHClient(hostname="192.168.1.121", port=22)#**default_test_options)
     client.connect()
+    client.get_interactive_shell()
     # print(client.send_command("sudo pihole -t"))
-    client.non_interactive_stream(command=pihole_command)
+    #client.non_interactive_stream(command=pihole_command)
 
 
     # SSHClient.connect_and_get_interactive_shell()
