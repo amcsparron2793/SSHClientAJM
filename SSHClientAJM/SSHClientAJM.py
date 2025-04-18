@@ -207,16 +207,15 @@ class SSHClient:
 
         try:
             while True:
-                # FIXME: this doesn't work, the single command is simply printed over and over, not executed
                 if not single_command:
                     # Read user input and send it to the server
                     command = sys.stdin.readline()
                 else:
-                    command = single_command
+                    command = single_command + "\n"
                 if not command:
                     break
-
                 self._cxn_channel.send(command)
+                single_command = None
         except KeyboardInterrupt:
             print("\n✋ Disconnected by user.")
         finally:
