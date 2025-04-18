@@ -15,6 +15,7 @@ Key Features:
 The script is designed as a standalone utility and can be executed directly. Users will be prompted for the
 necessary details (hostname, username, and password) to initiate the SSH connection.
 """
+from typing import Optional
 
 from _version import __version__
 
@@ -51,10 +52,14 @@ class SSHClient:
         self.port = port or input('Please Enter Port (22): ')
         if not self.port:
             self.port = 22
-        self.username = kwargs.get('username', input('Please Enter Username: '))
-        self.__password = kwargs.get('password', getpass.getpass('Please Enter Password: '))
+        self.username = kwargs.get('username', None)
+        if not self.username:
+            self.username = input('Please Enter Username: ')
+        self.__password = kwargs.get('password', None)
+        if not self.__password:
+            self.__password = getpass.getpass('Please Enter Password: ')
         self.client = self.init_client()
-        self._cxn_channel = None
+        self._cxn_channel: Optional[paramiko.Channel] = None
 
     @classmethod
     def connect_and_get_interactive_shell(cls):#, hostname, port, username, password):
@@ -85,6 +90,13 @@ class SSHClient:
         self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         return self.client
 
+    @property
+    def is_connected(self):
+        try:
+            return self.client.get_transport().is_active()
+        except AttributeError:
+            return False
+
     def connect(self):
         """
         Establish an SSH connection to the provided hostname using the specified credentials
@@ -112,6 +124,34 @@ class SSHClient:
         except Exception as e:
             print(f"❌ SSH connection error: {e}")
             self.close(1)
+
+    def send_command(self, command: str) -> str:
+        """
+        Executes a single command on the remote server and captures its output.
+    
+        This method sends a command over the SSH connection using `exec_command`,
+        waits for the command to complete, and retrieves the output and error streams.
+    
+        :param command: The command to execute over the SSH connection.
+        :type command: str
+        :return: The command output (stdout) and error output (stderr), concatenated as a string.
+        :rtype: str
+        :raises Exception: If the client is not connected or if an error occurs during execution.
+        """
+        if not self.is_connected:
+            raise Exception("Not connected to the server. Call `connect()` first.")
+
+        try:
+            stdin, stdout, stderr = self.client.exec_command(command)
+            stdout_content = stdout.read().decode().strip()
+            stderr_content = stderr.read().decode().strip()
+
+            if stderr_content:
+                return f"STDOUT:\n{stdout_content}\n\nSTDERR:\n{stderr_content}"
+            return stdout_content
+
+        except Exception as e:
+            raise Exception(f"Failed to execute command '{command}': {e}")
 
     def close(self, exit_code=0):
         """
@@ -159,6 +199,9 @@ class SSHClient:
                 sys.stdout.write(data.decode())
                 sys.stdout.flush()
 
+        if not self.is_connected:
+            raise paramiko.SSHException("Not connected to server, connect first")
+
         writer = threading.Thread(target=writeall, args=(self._cxn_channel,))
         writer.daemon = True
         writer.start()
@@ -173,20 +216,17 @@ class SSHClient:
         except KeyboardInterrupt:
             print("\n✋ Disconnected by user.")
         finally:
-            self._cxn_channel.close()
+            self.close(0)
+            #self._cxn_channel.close()
 
 
 
 if __name__ == "__main__":
-    # default_test_options = {
-    #     "hostname": input('Enter your SSH server hostname or IP address: '),
-    #     "port":22,
-    #     "username": input('Enter your SSH username: '),
-    #     "password": getpass.getpass("Enter your SSH password: ")
-    # }
-
     # this is how to connect without using the class method
-    # client = SSHClient(**default_test_options)
-    # client.connect()
+    client = SSHClient(hostname="192.168.1.121", port=22)#**default_test_options)
+    client.connect()
+    # print(client.send_command("sudo pihole -t"))
     # client.get_interactive_shell()
-    SSHClient.connect_and_get_interactive_shell()
+
+
+    # SSHClient.connect_and_get_interactive_shell()
