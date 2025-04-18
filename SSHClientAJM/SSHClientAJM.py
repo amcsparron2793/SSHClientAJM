@@ -52,7 +52,7 @@ class SSHClient:
         self.port = port or input('Please Enter Port (22): ')
         if not self.port:
             self.port = 22
-        self.username = kwargs.get('username', None)
+        self.username:Optional[str] = kwargs.get('username', None)
         if not self.username:
             self.username = input('Please Enter Username: ')
         self.__password = kwargs.get('password', None)
@@ -169,67 +169,117 @@ class SSHClient:
         print("🔒 SSH session closed.")
         exit(exit_code)
 
-    def get_interactive_shell(self, single_command=None):
+    @staticmethod
+    def _write_all_to_stdout(sock):
         """
-        Provides an interactive shell to communicate with a remote server over an
-        existing SSH channel. This method reads user input or executes a single
-        command, sends it to the server, and displays the output received via the
-        connected channel.
+        Handles continuous reading of data from a socket and displays it on the
+        standard output. The function reads data in chunks and terminates when no
+        more data is available from the socket.
 
-        :param single_command: A single command string to execute on the server.
-            If not provided, the method defaults to interactive mode to read input
-            continuously from the user.
-        :type single_command: str or None
+        :param sock: The socket object used for receiving data.
+        :type sock: socket.socket
         """
+        while True:
+            data = sock.recv(1024)
+            if not data:
+                break
+            sys.stdout.write(data.decode())
+            sys.stdout.flush()
 
-        def writeall(sock):
-            """
-            Handles continuous reading of data from a socket and displays it on the
-            standard output. The function reads data in chunks and terminates when no
-            more data is available from the socket.
+    def _start_writer_daemon(self):
+        """
+        Starts a writer daemon thread that handles output redirection by writing data
+        from the provided connection channel to the standard output.
 
-            :param sock: The socket object used for receiving data.
-            :type sock: socket.socket
-            """
-            while True:
-                data = sock.recv(1024)
-                if not data:
-                    break
-                sys.stdout.write(data.decode())
-                sys.stdout.flush()
+        This function initializes a daemon thread that repeatedly writes all data
+        retrieved from the connection channel to the standard output stream. The
+        thread is marked as a daemon to ensure it terminates automatically when the
+        main program exits. The thread execution is delegated to the target method
+        `_write_all_to_stdout`, which processes the specified connection channel.
 
-        if not self.is_connected:
-            raise paramiko.SSHException("Not connected to server, connect first")
-
-        writer = threading.Thread(target=writeall, args=(self._cxn_channel,))
+        :param self: The instance of the class that invokes this method.
+        :return: None
+        """
+        writer = threading.Thread(target=self._write_all_to_stdout, args=(self._cxn_channel,))
         writer.daemon = True
         writer.start()
 
+    def _stream_loop(self, command=None):
+        """
+        Executes a loop for continuously processing commands. If a command is not provided,
+        it reads input from the user, appends a newline, and sends it to the server through
+        the connected channel. This process runs indefinitely until interrupted or a breaking
+        condition is met. The method ensures resources are properly cleaned up after execution.
+
+        :param command: The initial command to be sent to the server. If None, the method
+            will read user input instead. Defaults to None.
+        :return: None
+        """
         try:
             while True:
-                if not single_command:
+                if not command:
                     # Read user input and send it to the server
                     command = sys.stdin.readline()
                 else:
-                    command = single_command + "\n"
+                    command = command + "\n"
                 if not command:
                     break
                 self._cxn_channel.send(command)
-                single_command = None
+                command = None
         except KeyboardInterrupt:
             print("\n✋ Disconnected by user.")
         finally:
             self.close(0)
             # self._cxn_channel.close()
 
+    def get_interactive_shell(self):
+        """
+        Provides an interactive shell for an SSH connection. This method ensures
+        that the connection is established before initiating the shell. It also starts
+        a writer daemon and enters a streaming loop to handle real-time data transfers
+        within the SSH session. The interactive shell allows for sending and receiving
+        commands or data dynamically.
+
+        :raises paramiko.SSHException: If the SSH client is not connected to the server,
+            indicating that the user must connect before attempting to open an
+            interactive shell.
+        """
+        if not self.is_connected:
+            raise paramiko.SSHException("Not connected to server, connect first")
+
+        self._start_writer_daemon()
+        self._stream_loop()
+
+    def non_interactive_stream(self, command):
+        """
+        Executes a command over an SSH connection in a non-interactive manner. This
+        method requires the SSH connection to already be established before being
+        called. It starts a writer daemon to handle the process and runs a streaming
+        loop for the provided command.
+
+        :param command: Command to be executed on the remote server.
+        :type command: str
+        :raises paramiko.SSHException: If the SSH connection is not established.
+        :return: None
+        """
+        if not self.is_connected:
+            raise paramiko.SSHException("Not connected to server, connect first")
+
+        self._start_writer_daemon()
+        self._stream_loop(command)
+
+
+
 
 
 if __name__ == "__main__":
+    pihole_command = "sudo pihole -t | grep --color=always -Ei 'query|blocked'"
+
     # this is how to connect without using the class method
     client = SSHClient(hostname="192.168.1.121", port=22)#**default_test_options)
     client.connect()
     # print(client.send_command("sudo pihole -t"))
-    # client.get_interactive_shell()
+    client.non_interactive_stream(command=pihole_command)
 
 
     # SSHClient.connect_and_get_interactive_shell()
